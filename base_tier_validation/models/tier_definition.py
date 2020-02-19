@@ -67,11 +67,16 @@ class TierDefinition(models.Model):
         string='Comment',
         default=False,
     )
+    ignore_next_definitions = fields.Boolean(
+        default=False
+    )
     approve_sequence = fields.Boolean(
         string='Approve by sequence',
         default=False,
         help="Approval order by the specified sequence number",
     )
+
+    _order = 'sequence ASC'
 
     @api.onchange('model_id')
     def onchange_model_id(self):

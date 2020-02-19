@@ -120,7 +120,12 @@ class TierValidation(models.AbstractModel):
         for rec in self:
             tiers = self.env[
                 'tier.definition'].search([('model', '=', self._name)])
-            valid_tiers = any([rec.evaluate_tier(tier) for tier in tiers])
+            valid_tiers = self.env[self._name]
+            for tier in tiers:
+                valid_tier = rec.evaluate_tier(tier)
+                valid_tiers += valid_tier
+                if valid_tier and tier.ignore_next_definitions:
+                    break
             rec.need_validation = not rec.review_ids and valid_tiers and \
                 getattr(rec, self._state_field) in self._state_from
 
@@ -206,12 +211,17 @@ class TierValidation(models.AbstractModel):
     def _add_comment(self, validate_reject):
         wizard = self.env.ref(
             'base_tier_validation.view_comment_wizard')
-        definition_ids = self.env['tier.definition'].search([
+        all_definition_ids = self.env['tier.definition'].search([
             ('model', '=', self._name),
             '|', ('reviewer_id', '=', self.env.user.id),
                  ('reviewer_group_id', 'in',
                   self.env.user.groups_id.ids)
         ])
+        definition_ids = self.env['tier.definition']
+        for definition in all_definition_ids:
+            definition_ids += definition
+            if definition.ignore_next_definitions and self.evaluate_tier(definition):
+                break
         return {
             'name': _('Comment'),
             'type': 'ir.actions.act_window',
@@ -305,18 +315,24 @@ class TierValidation(models.AbstractModel):
             if getattr(rec, self._state_field) in self._state_from:
                 if rec.need_validation:
                     tier_definitions = td_obj.search([
-                        ('model', '=', self._name)], order="sequence desc")
-                    sequence = 0
+                        ('model', '=', self._name)])
+                    to_add = []
                     for td in tier_definitions:
                         if rec.evaluate_tier(td):
-                            sequence += 1
-                            created_trs += tr_obj.create({
+                            to_add.append({
                                 'model': self._name,
                                 'res_id': rec.id,
                                 'definition_id': td.id,
-                                'sequence': sequence,
                                 'requested_by': self.env.uid,
                             })
+                            if td.ignore_next_definitions:
+                                break
+                    to_add.reverse()
+                    sequence = 0
+                    for review in to_add:
+                        sequence += 1
+                        review['sequence'] = sequence
+                        created_trs += tr_obj.create(review)
                     self._update_counter()
         self._notify_review_requested(created_trs)
         return created_trs
